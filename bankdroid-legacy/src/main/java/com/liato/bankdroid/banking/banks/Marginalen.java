@@ -2,17 +2,18 @@ package com.liato.bankdroid.banking.banks;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
+import java.util.Map;
+import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
-import org.apache.http.client.ClientProtocolException;
 import org.apache.http.message.BasicNameValuePair;
-import org.apache.http.protocol.HTTP;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 
 import android.content.Context;
-import android.text.Html;
 import android.text.InputType;
 
 import com.liato.bankdroid.Helpers;
@@ -23,6 +24,7 @@ import com.liato.bankdroid.banking.Transaction;
 import com.liato.bankdroid.banking.exceptions.BankChoiceException;
 import com.liato.bankdroid.banking.exceptions.BankException;
 import com.liato.bankdroid.banking.exceptions.LoginException;
+import com.liato.bankdroid.provider.IAccountTypes;
 import com.liato.bankdroid.provider.IBankTypes;
 
 import eu.nullbyte.android.urllib.CertificateReader;
@@ -32,21 +34,21 @@ public class Marginalen extends Bank {
 	private static final String TAG = "Marginalen";
     private static final String NAME = "Marginalen Bank";
     private static final String NAME_SHORT = "marginalen";
-    private static final String BASE_URL = "https://secure1.marginalen.se/marginalen/";
+    private static final String BASE_URL = "https://secure4.marginalen.se";
 	private static final int BANKTYPE_ID = IBankTypes.MARGINALEN;
 	private static final int INPUT_TYPE_USERNAME = InputType.TYPE_CLASS_PHONE;
     private static final String INPUT_HINT_USERNAME = "ÅÅMMDD-XXXX";
-	
-	private Pattern reLoginLink = Pattern.compile("href=\"(engine\\?usecase=pin&[a-zA-Z0-9;=&._]+)");
-	private Pattern reHash = Pattern.compile("name=\"hash\" value=\"([a-zA-Z0-9]+)\"");
-	private Pattern reGuid = Pattern.compile("name=\"guid\" value=\"([a-zA-Z0-9]+)\"");
-	private Pattern reAccountLink = Pattern.compile("href=\"(engine\\?[a-zA-Z0-9;=&._]+menuid=15[a-zA-Z0-9;=&._]+)\"");
-	private Pattern reAccounts = Pattern.compile("<td>\\s*([a-zA-ZåäöÅÄÖ0-9]+)\\s*</td>\\s*<td>\\s*<a href=\"(engine\\?usecase=account[a-zA-Z0-9;=&._]+)\">([0-9]+)</a>\\s*</td>\\s*<td class=\"aright\">\\s*([0-9.,]+)\\s*[a-zA-Z&;]+\\s*</td>");
-	private Pattern reTransactions = Pattern.compile("href=\"engine\\?usecase=transactiondetails.*tabindex=\"4\">([0-9\\-]+)</a>\\s*</td>\\s*<td>\\s*(.*?)\\s*</td>\\s*<td class=\"aright\">\\s*([\\-0-9\\.,]+)&nbsp;");
-	
-	private String accountUrl = "";
-    
-	String response;
+
+    private static final String INIT_URL = BASE_URL +"/ebank/sec/initLoginEbank.do";
+    private static final String LOGIN_URL = BASE_URL +"/ec/login/login.do";
+    private static final String SELECT_PROVIDER_URL = BASE_URL + "/ec/login/selectProvider.do";
+    private static final String LOGIN_FORM_URL = BASE_URL + "/ec/pintan/processLoginStep1.do";
+    private static final String OVERVIEW_URL = BASE_URL + "/ebank/menu/redirectByMenu.do?menuId=myengagements";
+    private static final String ACCOUNT_OVERVIEW = BASE_URL + "/ebank/accountview/showAccountDetails.do";
+    private static final String TRANSACTIONS_OVERVIEW = BASE_URL + "/ebank/account/fetchTransactionList.do";
+
+    String response;
+
     public Marginalen(Context context) {
         super(context);
         super.TAG = TAG;
@@ -56,50 +58,32 @@ public class Marginalen extends Bank {
         super.INPUT_TYPE_USERNAME = INPUT_TYPE_USERNAME;
         super.INPUT_HINT_USERNAME = INPUT_HINT_USERNAME;
     }
-    
+
     public Marginalen(String username, String password, Context context) throws BankException,
             LoginException, BankChoiceException, IOException {
 		this(context);
 		this.update(username, password);
 	}
-    
+
     @Override
     protected LoginPackage preLogin() throws BankException, IOException {
         urlopen = new Urllib(context, CertificateReader.getCertificates(context, R.raw.cert_marginalen, R.raw.cert_marginalen2));
-        urlopen.setContentCharset(HTTP.ISO_8859_1);
-        Matcher matcher;
-        response = urlopen.open(BASE_URL + "engine");
-        matcher = reLoginLink.matcher(response);
 
-        if (!matcher.find()) {
-            throw new BankException(res.getText(R.string.unable_to_find).toString() + " login link.");
-        }
-        String url = BASE_URL + matcher.group(1);
-        url = url.replaceAll("&amp;", "&");
-        response = urlopen.open(url);
+        response = urlopen.open(INIT_URL);
+        List<NameValuePair> initFormData = new ArrayList<>(createInitForm(response).values());
 
-        matcher = reHash.matcher(response);
-        if (!matcher.find())
-        	throw new BankException(res.getText(R.string.unable_to_find).toString() + " hash value.");
+        response = urlopen.open(LOGIN_URL, initFormData, true);
 
-        String hash = matcher.group(1);
+        Map<String, NameValuePair> formData = createSelectProviderForm(response);
+        formData.put("id", new BasicNameValuePair("id","PIN"));
+        List<NameValuePair> selectProviderForm = new ArrayList<>(formData.values());
+        response = urlopen.open(SELECT_PROVIDER_URL, selectProviderForm, true);
 
-        matcher = reGuid.matcher(response);
-        if (!matcher.find())
-        	throw new BankException(res.getText(R.string.unable_to_find).toString() + " GUID value.");
-
-        String guid = matcher.group(1);
-
-        List <NameValuePair> postData = new ArrayList <NameValuePair>();
-        postData.add(new BasicNameValuePair("usecase", "base"));
-        postData.add(new BasicNameValuePair("command", "formcommand"));
-        postData.add(new BasicNameValuePair("commandorigin", "0.pin_logon_step1_view_handler"));
-        postData.add(new BasicNameValuePair("guid", guid));
-        postData.add(new BasicNameValuePair("hash", hash));
-        postData.add(new BasicNameValuePair("userId", username));
-        postData.add(new BasicNameValuePair("pin", password));
-
-        return new LoginPackage(urlopen, postData, response, BASE_URL + "engine");
+        Map<String, NameValuePair> postDataMap = createLoginForm(response);
+        postDataMap.put("userId", new BasicNameValuePair("userId",username));
+        postDataMap.put("pin", new BasicNameValuePair("pin", password));
+        List<NameValuePair> postData = new ArrayList<>(postDataMap.values());
+        return new LoginPackage(urlopen, postData, response, LOGIN_FORM_URL);
     }
 
     @Override
@@ -107,19 +91,15 @@ public class Marginalen extends Bank {
     	LoginPackage lp = preLogin();
     	response = urlopen.open(lp.getLoginTarget(), lp.getPostData());
 
-		if (response.contains("Felmeddelande")) {
-			throw new LoginException(res.getText(R.string.invalid_username_password).toString());
-		}
-
-		Matcher matcher;
-		matcher = reAccountLink.matcher(response);
-		if (!matcher.find())
-        	throw new BankException(res.getText(R.string.unable_to_find).toString() + " accounts link.");
-		accountUrl = BASE_URL + matcher.group(1).replaceAll("&amp;", "&");
+        if( response.contains("loginForm.errors")) {
+            Document doc = Jsoup.parse(response);
+            Element error = doc.select("#loginForm p.error").first();
+            throw new LoginException(error.text());
+        }
 
 	    return urlopen;
     }
-    
+
     @Override
     public void update() throws BankException, LoginException, BankChoiceException, IOException {
     	super.update();
@@ -127,47 +107,89 @@ public class Marginalen extends Bank {
 			throw new LoginException(res.getText(R.string.invalid_username_password).toString());
 		}
 		urlopen = login();
-	    response = urlopen.open(accountUrl);
-        Matcher matcher = reAccounts.matcher(response);
-		while (matcher.find()) {
-            /*
-             * Capture groups:
-             * GROUP                EXAMPLE DATA
-             * 1: Name              Högräntekonto
-             * 2: URL               engine?usecase=account&amp;command=transactions&amp;guid=mCmupGvnAAJuC76MGuuRnwCC&amp;commandorigin=0.account_private_viewhandler&amp;account_table=0&amp;hash=Be2HxFargpk2m0BI2tShAACC
-             * 3: ID                92351124972
-             * 4: Amount            100.000,00
-             *
-             */
-			Account account = new Account(Html.fromHtml(matcher.group(1)).toString(), Helpers.parseBalance(matcher.group(4)), matcher.group(2), Long.parseLong(matcher.group(3)));
-			balance = balance.add(Helpers.parseBalance(matcher.group(4)));
-			accounts.add(account);
-		}
+	    response = urlopen.open(OVERVIEW_URL);
+        try {
+            Document doc = Jsoup.parse(response);
+
+            Elements checkingsAccounts = doc.select("#checkingAccountsTable tbody tr");
+            for (Element checkingsAccount : checkingsAccounts) {
+                Element name = checkingsAccount.select("td:first-child a").first();
+                String nameString = name.text().trim();
+                String id = parseAccountId(name.attr("href"));
+                String currency = checkingsAccount.child(2).text().trim();
+                String balance = checkingsAccount.child(3).text().trim();
+                accounts.add(new Account(nameString, Helpers.parseBalance(balance), id, IAccountTypes.REGULAR, currency));
+            }
+
+            Elements loanAccounts = doc.select("#loanAccountsTable tbody tr");
+            for (Element loanAccount : loanAccounts) {
+                Element name = loanAccount.select("td:first-child a").first();
+                String nameString = name.text().trim();
+                String id = parseAccountId(name.attr("href"));
+                String currency = loanAccount.child(3).text().trim();
+                String balance = loanAccount.child(4).text().trim();
+                accounts.add(new Account(nameString, Helpers.parseBalance(balance), id, IAccountTypes.REGULAR, currency));
+            }
+        } catch (Exception e) {
+            throw new BankException(e.getMessage(), e);
+        }
 		if (accounts.isEmpty()) {
 			throw new BankException(res.getText(R.string.no_accounts_found).toString());
 		}
 	    super.updateComplete();
     }
-    
+
     public void updateTransactions(Account account, Urllib urlopen) throws LoginException,
             BankException, IOException {
 		super.updateTransactions(account, urlopen);
-		Matcher matcher;
-		ArrayList<Transaction> transactions = new ArrayList<Transaction>();
-        response = urlopen.open(BASE_URL + account.getId().replaceAll("&amp;", "&"));
+        List<Transaction> transactions = new ArrayList<Transaction>();
 
-        matcher = reTransactions.matcher(response);
-        while (matcher.find()) {
-        	/*
-        	 * Capture groups:
-        	 * GROUP                    EXAMPLE DATA
-        	 * 1: Date                  2011-04-06
-        	 * 2: Specification         Pressbyran
-        	 * 3: Amount                -20
-        	 *
-        	 */
-        	transactions.add(new Transaction(matcher.group(1).trim(), Html.fromHtml(matcher.group(2)).toString().trim(), Helpers.parseBalance(matcher.group(3))));
+        HttpResponse httpResponse = urlopen.openAsHttpResponse(ACCOUNT_OVERVIEW + "?back=back&accountId=" + account.getId(), false);
+        if(httpResponse.getStatusLine().getStatusCode() != 200) {
+            throw new BankException(httpResponse.getStatusLine().toString());
+        }
+        response = urlopen.open(TRANSACTIONS_OVERVIEW);
+        Document doc = Jsoup.parse(response);
+        Elements elements = doc.select("#transactions tbody tr");
+
+        for(Element elem : elements) {
+            String date = elem.child(0).text().trim();
+            String description = elem.child(2).text().trim();
+            String amount = elem.child(3).text().trim();
+            transactions.add(new Transaction(date, description, Helpers.parseBalance(amount)));
         }
 		account.setTransactions(transactions);
 	}
+
+
+    private Map<String, NameValuePair> createInitForm(String response) {
+        return parseFormFields(response, "form[name=authForm] input, button");
+    }
+
+    private Map<String, NameValuePair> createSelectProviderForm(String response) {
+        return parseFormFields(response, "#providerSelectForm input");
+    }
+
+    private Map<String, NameValuePair> createLoginForm(String response) {
+        return parseFormFields(response, "#loginForm input");
+    }
+
+    private String parseAccountId(String url) {
+        int idx = url.indexOf("accountId");
+        int lastIdx = url.indexOf("&",idx);
+        lastIdx = lastIdx == -1 ? url.length() : lastIdx;
+        return url.substring(idx, lastIdx).split("=")[1];
+    }
+
+    private Map<String, NameValuePair> parseFormFields(String response, String cssSelector) {
+        Map<String, NameValuePair> form = new HashMap<>();
+        Document doc = Jsoup.parse(response);
+
+        Elements elements = doc.select(cssSelector);
+        for (Element element : elements) {
+            String name = element.attr("name");
+            form.put(name, new BasicNameValuePair(name, element.attr("value")));
+        }
+        return form;
+    }
 }
