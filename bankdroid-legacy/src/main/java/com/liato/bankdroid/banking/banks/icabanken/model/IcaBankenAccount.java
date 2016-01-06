@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -138,6 +139,9 @@ public class IcaBankenAccount {
 
     @JsonProperty("Services")
     public List<String> getServices() {
+        if(mServices == null) {
+            mServices = new ArrayList<>();
+        }
         return mServices;
     }
 
@@ -147,6 +151,9 @@ public class IcaBankenAccount {
 
     @JsonProperty("Transactions")
     public List<IcaBankenTransaction> getTransactions() {
+        if(mTransactions == null) {
+            mTransactions = new ArrayList<>();
+        }
         return mTransactions;
     }
 
@@ -156,6 +163,9 @@ public class IcaBankenAccount {
 
     @JsonProperty("ValidFor")
     public List<String> getValidFor() {
+        if(mValidFor == null) {
+            mValidFor = new ArrayList<>();
+        }
         return mValidFor;
     }
 
